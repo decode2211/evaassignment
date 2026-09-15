@@ -1,9 +1,4 @@
-// This file is the SQLite implementation of the Store interface. It is the
-// only place in the whole project that contains raw SQL. Keeping all
-// database code in one file makes it easy to audit for the two things that
-// matter most for correctness and security here: that passwords are never
-// stored in plain text, and that every ticket query filters by the owning
-// user.
+// SQLite implementation of the Store interface.
 package store
 
 import (
@@ -18,26 +13,18 @@ import (
 
 	"github.com/decode2211/evaassignment/internal/models"
 
-	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
+	_ "modernc.org/sqlite"
 )
 
-// timeLayout is how we store timestamps as text in SQLite. RFC3339 in UTC
-// is human-readable, sorts correctly as a string, and is exactly the format
-// the API contract requires in JSON responses.
+// timeLayout stores timestamps as RFC3339 UTC text.
 const timeLayout = time.RFC3339
 
-// SQLiteStore implements the Store interface on top of a SQLite database
-// file. SQLite is a great fit for a small assignment like this: it needs no
-// separate database server, the whole database is just one file, and
-// modernc.org/sqlite is a pure-Go driver so the app can be compiled into a
-// tiny, fully static Docker image with no C toolchain required.
+// SQLiteStore implements Store on top of a SQLite database file.
 type SQLiteStore struct {
 	db *sql.DB
 }
 
-// New opens (or creates) the SQLite database at dbPath, creating its parent
-// directory if necessary, and makes sure the required tables exist. This is
-// the one function the rest of the app calls to get a working Store.
+// New opens or creates the SQLite database at dbPath and runs migrations.
 func New(dbPath string) (*SQLiteStore, error) {
 	if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -50,10 +37,8 @@ func New(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
-	// SQLite only allows one writer at a time. Limiting the pool to a
-	// single connection avoids "database is locked" errors under
-	// concurrent requests, at the cost of serializing writes - a perfectly
-	// fine trade-off for a small ticket system.
+	// SQLite allows only one writer at a time; a single connection avoids
+	// "database is locked" errors under concurrent requests.
 	db.SetMaxOpenConns(1)
 
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
@@ -72,9 +57,7 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
-// migrate creates the users and tickets tables if they do not already
-// exist. Using "CREATE TABLE IF NOT EXISTS" keeps this idempotent, so it is
-// safe to run every time the server starts.
+// migrate creates the users and tickets tables if they don't already exist.
 func (s *SQLiteStore) migrate() error {
 	const schema = `
 	CREATE TABLE IF NOT EXISTS users (
@@ -101,9 +84,7 @@ func (s *SQLiteStore) migrate() error {
 	return err
 }
 
-// CreateUser inserts a new user row. The caller is responsible for hashing
-// the password before it ever reaches this function - this function only
-// ever sees and stores the hash, never the original password.
+// CreateUser inserts a new user row. Only the bcrypt hash is stored, never the raw password.
 func (s *SQLiteStore) CreateUser(ctx context.Context, email, passwordHash, name string) (models.User, error) {
 	now := time.Now().UTC()
 	res, err := s.db.ExecContext(ctx,
@@ -111,9 +92,6 @@ func (s *SQLiteStore) CreateUser(ctx context.Context, email, passwordHash, name 
 		email, passwordHash, name, now.Format(timeLayout),
 	)
 	if err != nil {
-		// SQLite reports a UNIQUE constraint violation as a plain error
-		// string; checking its text is the standard way to detect this
-		// with the database/sql package (there is no portable typed error).
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return models.User{}, ErrDuplicateEmail
 		}
@@ -132,7 +110,6 @@ func (s *SQLiteStore) CreateUser(ctx context.Context, email, passwordHash, name 
 	}, nil
 }
 
-// scanUser reads one row from a *sql.Row/*sql.Rows into a models.User.
 func scanUser(row interface{ Scan(...any) error }) (models.User, error) {
 	var (
 		u         models.User
@@ -149,7 +126,7 @@ func scanUser(row interface{ Scan(...any) error }) (models.User, error) {
 	return u, nil
 }
 
-// GetUserByEmail finds a user by their email address, used during login.
+// GetUserByEmail finds a user by email, used during login.
 func (s *SQLiteStore) GetUserByEmail(ctx context.Context, email string) (models.User, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, email, password_hash, name, created_at FROM users WHERE email = ?`,
@@ -162,8 +139,7 @@ func (s *SQLiteStore) GetUserByEmail(ctx context.Context, email string) (models.
 	return u, err
 }
 
-// GetUserByID finds a user by primary key, used by the auth middleware to
-// re-check (on every request) that the user encoded in a JWT still exists.
+// GetUserByID finds a user by primary key, used to re-check a token's user still exists.
 func (s *SQLiteStore) GetUserByID(ctx context.Context, id int64) (models.User, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, email, password_hash, name, created_at FROM users WHERE id = ?`,
@@ -176,10 +152,7 @@ func (s *SQLiteStore) GetUserByID(ctx context.Context, id int64) (models.User, e
 	return u, err
 }
 
-// CreateTicket inserts a new ticket for userID. Every new ticket starts
-// life with status "open" - this function does not accept a status
-// parameter at all, so there is no way to accidentally create a ticket in
-// any other state.
+// CreateTicket inserts a new ticket for userID, always starting as "open".
 func (s *SQLiteStore) CreateTicket(ctx context.Context, userID int64, title, description string) (models.Ticket, error) {
 	now := time.Now().UTC()
 	nowStr := now.Format(timeLayout)
@@ -206,7 +179,6 @@ func (s *SQLiteStore) CreateTicket(ctx context.Context, userID int64, title, des
 	}, nil
 }
 
-// scanTicket reads one row into a models.Ticket.
 func scanTicket(row interface{ Scan(...any) error }) (models.Ticket, error) {
 	var (
 		t                    models.Ticket
@@ -231,10 +203,8 @@ func scanTicket(row interface{ Scan(...any) error }) (models.Ticket, error) {
 	return t, nil
 }
 
-// ListTicketsByUser returns all tickets belonging to userID, newest first.
-// The "WHERE user_id = ?" clause is what actually enforces ownership here -
-// it is impossible for this query to return another user's tickets, no
-// matter what a caller further up the stack does or forgets to do.
+// ListTicketsByUser returns all tickets owned by userID, newest first.
+// The WHERE clause is what enforces ownership, not application code.
 func (s *SQLiteStore) ListTicketsByUser(ctx context.Context, userID int64) ([]models.Ticket, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, user_id, title, description, status, created_at, updated_at
@@ -246,8 +216,6 @@ func (s *SQLiteStore) ListTicketsByUser(ctx context.Context, userID int64) ([]mo
 	}
 	defer rows.Close()
 
-	// Start with an empty (non-nil) slice so that a user with zero tickets
-	// gets back "[]" in JSON, never "null" - the API contract requires this.
 	tickets := make([]models.Ticket, 0)
 	for rows.Next() {
 		t, err := scanTicket(rows)
@@ -259,13 +227,9 @@ func (s *SQLiteStore) ListTicketsByUser(ctx context.Context, userID int64) ([]mo
 	return tickets, rows.Err()
 }
 
-// GetTicketByIDForUser fetches one ticket, but the SQL query itself
-// requires both the ID to match AND the owner to match. If the ticket
-// belongs to someone else, this query finds zero rows - exactly the same
-// result as if the ticket never existed at all. That is deliberate: it
-// means a curious user cannot even tell whether ticket #42 belongs to
-// another real user or simply does not exist, which avoids leaking
-// information about other accounts.
+// GetTicketByIDForUser returns ErrNotFound both when the ticket doesn't
+// exist and when it belongs to someone else, so a lookup can't confirm
+// another user's ticket ID exists.
 func (s *SQLiteStore) GetTicketByIDForUser(ctx context.Context, id, userID int64) (models.Ticket, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, user_id, title, description, status, created_at, updated_at
@@ -279,19 +243,15 @@ func (s *SQLiteStore) GetTicketByIDForUser(ctx context.Context, id, userID int64
 	return t, err
 }
 
-// UpdateTicketStatus changes a ticket's status after checking ownership and
-// the allowed-transition rules. Everything happens inside one database
-// transaction so that two requests changing the same ticket at the same
-// moment can never both succeed based on stale information (no race
-// condition): the transaction locks the row for the duration of the
-// read-check-write, so a second concurrent request simply waits its turn
-// and then sees the already-updated status.
+// UpdateTicketStatus checks ownership and the transition rules, then
+// updates the row. Runs in one transaction so two concurrent requests
+// can't both act on the same stale status.
 func (s *SQLiteStore) UpdateTicketStatus(ctx context.Context, id, userID int64, newStatus models.Status) (models.Ticket, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.Ticket{}, err
 	}
-	defer tx.Rollback() //nolint:errcheck // no-op once committed
+	defer tx.Rollback()
 
 	row := tx.QueryRowContext(ctx,
 		`SELECT id, user_id, title, description, status, created_at, updated_at
