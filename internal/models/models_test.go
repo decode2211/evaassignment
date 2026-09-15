@@ -1,7 +1,4 @@
-// Unit tests for the ticket status transition rules. These tests exist to
-// make one guarantee obvious and permanent: once a ticket is closed, there
-// is no code path - now or after any future change - that can move it
-// anywhere else.
+// Tests for the ticket status transition rules.
 package models
 
 import "testing"
@@ -9,9 +6,7 @@ import "testing"
 func TestCanTransition(t *testing.T) {
 	allStatuses := []Status{StatusOpen, StatusInProgress, StatusClosed}
 
-	// allowed lists every (from, to) pair that must succeed. Every other
-	// combination of the three statuses (there are 9 total pairs
-	// including same-to-same) must fail.
+	// Every (from, to) pair not listed here must fail.
 	allowed := map[Status]map[Status]bool{
 		StatusOpen:       {StatusInProgress: true, StatusClosed: true},
 		StatusInProgress: {StatusClosed: true},
