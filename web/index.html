@@ -1,5 +1,362 @@
 <!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>Ticket System</title></head>
-<body><p>Placeholder - full frontend coming in a later commit.</p></body>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ticket System</title>
+<style>
+  /* Plain-English note: this whole <style> block just makes the page look
+     clean and readable, and makes it usable on both a phone and a
+     desktop screen (that's what "responsive" means below). */
+  :root {
+    --bg: #f5f6f8;
+    --card-bg: #ffffff;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --border: #e2e4ea;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --danger: #dc2626;
+    --open: #2563eb;
+    --in-progress: #d97706;
+    --closed: #16a34a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); margin: 0 0 24px; font-size: 0.9rem; }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-size: 0.85rem; margin: 12px 0 4px; color: var(--muted); }
+  input, textarea {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 16px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    background: var(--primary);
+    color: white;
+  }
+  button:hover { background: var(--primary-hover); }
+  button.secondary { background: transparent; color: var(--primary); border: 1px solid var(--primary); }
+  button.secondary:hover { background: #eef2ff; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .error-box {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: var(--danger);
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    margin: 12px 0;
+  }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs button { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .tabs button.active { background: var(--primary); color: white; border-color: var(--primary); }
+  .ticket {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .ticket-title { font-weight: 600; margin: 0 0 4px; }
+  .ticket-desc { color: var(--muted); font-size: 0.88rem; margin: 0 0 10px; white-space: pre-wrap; }
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 3px 8px;
+    border-radius: 999px;
+    color: white;
+  }
+  .badge.open { background: var(--open); }
+  .badge.in_progress { background: var(--in-progress); }
+  .badge.closed { background: var(--closed); }
+  .meta { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
+  .empty-state { color: var(--muted); text-align: center; padding: 24px 0; }
+  .link-btn { background: none; border: none; color: var(--primary); font-weight: 600; padding: 0; }
+  @media (max-width: 480px) {
+    .wrap { padding: 16px 12px 48px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+// ---------------------------------------------------------------------
+// This is the entire frontend: one HTML file, plain JavaScript, no build
+// step or framework. It talks to the backend API using fetch() and keeps
+// the login token in the browser's localStorage so a refresh doesn't log
+// the user out.
+// ---------------------------------------------------------------------
+
+const TOKEN_KEY = "ticket_system_token";
+// Statuses a ticket is allowed to move to next, mirroring the backend's
+// rule in internal/models/models.go. Keeping this in sync means the UI
+// never even offers a button for a move the server would reject.
+const NEXT_STATUSES = {
+  open: ["in_progress", "closed"],
+  in_progress: ["closed"],
+  closed: [],
+};
+const STATUS_LABELS = { open: "Open", in_progress: "In Progress", closed: "Closed" };
+
+const app = document.getElementById("app");
+
+function getToken() { return localStorage.getItem(TOKEN_KEY); }
+function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
+function clearToken() { localStorage.removeItem(TOKEN_KEY); }
+
+// api() is a tiny wrapper around fetch that adds the auth header (when
+// logged in), parses JSON, and throws a plain Error with the server's own
+// message so callers can show it directly to the user.
+async function api(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  const token = getToken();
+  if (token) headers["Authorization"] = "Bearer " + token;
+
+  const res = await fetch(path, { ...options, headers });
+  let body = null;
+  try { body = await res.json(); } catch (_) { /* no body */ }
+
+  if (!res.ok) {
+    const message = (body && body.error) || `Request failed (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+  return body;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function formatDate(iso) {
+  try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
+}
+
+// ---- Rendering ----
+// The whole app is just one function per "screen" that rebuilds the
+// #app div's HTML. There's no virtual DOM or component system - for a
+// page this small, plain re-rendering is easier to follow than any
+// framework would be.
+
+let authMode = "login"; // "login" or "register"
+let authError = "";
+let dashboardError = "";
+let tickets = [];
+let loadingTickets = false;
+
+function render() {
+  if (!getToken()) {
+    renderAuth();
+  } else {
+    renderDashboard();
+  }
+}
+
+function renderAuth() {
+  const isLogin = authMode === "login";
+  app.innerHTML = `
+    <h1>Ticket System</h1>
+    <p class="subtitle">${isLogin ? "Log in to see your tickets." : "Create an account to get started."}</p>
+    <div class="card">
+      <div class="tabs">
+        <button data-tab="login" class="${isLogin ? "active" : ""}">Log In</button>
+        <button data-tab="register" class="${!isLogin ? "active" : ""}">Register</button>
+      </div>
+      ${authError ? `<div class="error-box">${escapeHtml(authError)}</div>` : ""}
+      <form id="auth-form">
+        ${!isLogin ? `
+          <label for="name">Name (optional)</label>
+          <input id="name" type="text" placeholder="Your name">
+        ` : ""}
+        <label for="email">Email</label>
+        <input id="email" type="email" required placeholder="you@example.com">
+        <label for="password">Password</label>
+        <input id="password" type="password" required minlength="6" placeholder="At least 6 characters">
+        <div class="row" style="margin-top:16px;">
+          <button type="submit">${isLogin ? "Log In" : "Register"}</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  app.querySelectorAll("[data-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      authMode = btn.dataset.tab;
+      authError = "";
+      render();
+    });
+  });
+
+  app.querySelector("#auth-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    authError = "";
+    const email = app.querySelector("#email").value;
+    const password = app.querySelector("#password").value;
+
+    try {
+      if (isLogin) {
+        const resp = await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+        setToken(resp.token);
+      } else {
+        const name = app.querySelector("#name").value;
+        await api("/auth/register", { method: "POST", body: JSON.stringify({ email, password, name }) });
+        // Registration succeeded - log the new user straight in so they
+        // don't have to type their details twice.
+        const resp = await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+        setToken(resp.token);
+      }
+      dashboardError = "";
+      await loadTickets();
+      render();
+    } catch (err) {
+      authError = err.message;
+      render();
+    }
+  });
+}
+
+async function loadTickets() {
+  loadingTickets = true;
+  try {
+    tickets = await api("/tickets");
+  } catch (err) {
+    if (err.message.toLowerCase().includes("token") || err.message.toLowerCase().includes("authoriz")) {
+      // The token is no longer valid (expired, or the account is gone) -
+      // send the user back to the login screen instead of showing a
+      // confusing error on a broken dashboard.
+      clearToken();
+      return;
+    }
+    dashboardError = err.message;
+  } finally {
+    loadingTickets = false;
+  }
+}
+
+function renderDashboard() {
+  app.innerHTML = `
+    <div class="top-bar">
+      <div>
+        <h1>My Tickets</h1>
+        <p class="subtitle" style="margin:0;">Only tickets you created are ever shown here.</p>
+      </div>
+      <button class="secondary" id="logout-btn">Log Out</button>
+    </div>
+
+    <div class="card">
+      <strong>Create a new ticket</strong>
+      ${dashboardError ? `<div class="error-box">${escapeHtml(dashboardError)}</div>` : ""}
+      <form id="create-form">
+        <label for="title">Title</label>
+        <input id="title" type="text" required maxlength="200" placeholder="What's the problem?">
+        <label for="description">Description (optional)</label>
+        <textarea id="description" placeholder="Any extra detail..."></textarea>
+        <div class="row" style="margin-top:16px;">
+          <button type="submit">Create Ticket</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="ticket-list">
+      ${loadingTickets ? "<p class='empty-state'>Loading...</p>" : renderTicketList()}
+    </div>
+  `;
+
+  app.querySelector("#logout-btn").addEventListener("click", () => {
+    clearToken();
+    render();
+  });
+
+  app.querySelector("#create-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    dashboardError = "";
+    const title = app.querySelector("#title").value;
+    const description = app.querySelector("#description").value;
+    try {
+      await api("/tickets", { method: "POST", body: JSON.stringify({ title, description }) });
+      await loadTickets();
+      render();
+    } catch (err) {
+      dashboardError = err.message;
+      render();
+    }
+  });
+
+  app.querySelectorAll("[data-status-btn]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const newStatus = btn.dataset.statusBtn;
+      dashboardError = "";
+      try {
+        await api(`/tickets/${id}/status`, { method: "PATCH", body: JSON.stringify({ status: newStatus }) });
+        await loadTickets();
+        render();
+      } catch (err) {
+        dashboardError = err.message;
+        render();
+      }
+    });
+  });
+}
+
+function renderTicketList() {
+  if (tickets.length === 0) {
+    return `<p class="empty-state">You have no tickets yet. Create your first one above.</p>`;
+  }
+  return tickets.map((t) => {
+    const next = NEXT_STATUSES[t.status] || [];
+    const actions = next.map((s) =>
+      `<button data-status-btn="${s}" data-id="${t.id}" class="secondary">Mark as ${escapeHtml(STATUS_LABELS[s] || s)}</button>`
+    ).join(" ");
+    return `
+      <div class="ticket">
+        <p class="ticket-title">${escapeHtml(t.title)} <span class="badge ${t.status}">${escapeHtml(STATUS_LABELS[t.status] || t.status)}</span></p>
+        ${t.description ? `<p class="ticket-desc">${escapeHtml(t.description)}</p>` : ""}
+        <div class="row">${actions || "<span class='meta'>No further actions available.</span>"}</div>
+        <p class="meta">Created ${formatDate(t.created_at)} · Updated ${formatDate(t.updated_at)}</p>
+      </div>
+    `;
+  }).join("");
+}
+
+// ---- Boot ----
+(async function start() {
+  if (getToken()) {
+    render(); // show a loading dashboard immediately
+    await loadTickets();
+  }
+  render();
+})();
+</script>
+</body>
 </html>
