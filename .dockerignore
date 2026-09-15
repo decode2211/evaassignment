@@ -1,5 +1,4 @@
-# Keeps the Docker build context small and avoids ever baking local
-# secrets, build artifacts, or the local SQLite database into an image.
+# Keeps the build context small and out of the final image.
 .git
 .gitignore
 data/
@@ -11,4 +10,3 @@ data/
 *.exe
 server
 tmp/
-MASTER_PROMPT.md
