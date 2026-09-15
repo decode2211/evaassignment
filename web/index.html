@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ticket System</title>
 <style>
-  /* Plain-English note: this whole <style> block just makes the page look
-     clean and readable, and makes it usable on both a phone and a
-     desktop screen (that's what "responsive" means below). */
   :root {
     --bg: #f5f6f8;
     --card-bg: #ffffff;
@@ -109,17 +106,12 @@
 <div class="wrap" id="app"></div>
 
 <script>
-// ---------------------------------------------------------------------
-// This is the entire frontend: one HTML file, plain JavaScript, no build
-// step or framework. It talks to the backend API using fetch() and keeps
-// the login token in the browser's localStorage so a refresh doesn't log
-// the user out.
-// ---------------------------------------------------------------------
+// Plain JS, no build step or framework. Talks to the API with fetch()
+// and keeps the login token in localStorage.
 
 const TOKEN_KEY = "ticket_system_token";
-// Statuses a ticket is allowed to move to next, mirroring the backend's
-// rule in internal/models/models.go. Keeping this in sync means the UI
-// never even offers a button for a move the server would reject.
+// Mirrors the transition rules in internal/models/models.go, so the UI
+// never offers a button for a move the server would reject.
 const NEXT_STATUSES = {
   open: ["in_progress", "closed"],
   in_progress: ["closed"],
@@ -133,9 +125,7 @@ function getToken() { return localStorage.getItem(TOKEN_KEY); }
 function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
 function clearToken() { localStorage.removeItem(TOKEN_KEY); }
 
-// api() is a tiny wrapper around fetch that adds the auth header (when
-// logged in), parses JSON, and throws a plain Error with the server's own
-// message so callers can show it directly to the user.
+// Wraps fetch: adds the auth header, parses JSON, throws on error.
 async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   const token = getToken();
@@ -162,12 +152,7 @@ function formatDate(iso) {
   try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
 }
 
-// ---- Rendering ----
-// The whole app is just one function per "screen" that rebuilds the
-// #app div's HTML. There's no virtual DOM or component system - for a
-// page this small, plain re-rendering is easier to follow than any
-// framework would be.
-
+// One function per screen, rebuilding #app's HTML directly - no vdom needed here.
 let authMode = "login"; // "login" or "register"
 let authError = "";
 let dashboardError = "";
@@ -230,8 +215,7 @@ function renderAuth() {
       } else {
         const name = app.querySelector("#name").value;
         await api("/auth/register", { method: "POST", body: JSON.stringify({ email, password, name }) });
-        // Registration succeeded - log the new user straight in so they
-        // don't have to type their details twice.
+        // Log the new user straight in.
         const resp = await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
         setToken(resp.token);
       }
@@ -251,9 +235,7 @@ async function loadTickets() {
     tickets = await api("/tickets");
   } catch (err) {
     if (err.message.toLowerCase().includes("token") || err.message.toLowerCase().includes("authoriz")) {
-      // The token is no longer valid (expired, or the account is gone) -
-      // send the user back to the login screen instead of showing a
-      // confusing error on a broken dashboard.
+      // Token no longer valid - back to the login screen.
       clearToken();
       return;
     }
@@ -349,10 +331,9 @@ function renderTicketList() {
   }).join("");
 }
 
-// ---- Boot ----
 (async function start() {
   if (getToken()) {
-    render(); // show a loading dashboard immediately
+    render();
     await loadTickets();
   }
   render();
