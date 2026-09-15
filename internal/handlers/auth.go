@@ -1,6 +1,4 @@
-// This file implements the two "public" account endpoints: registering a
-// brand-new account and logging in to get a login token (JWT). Neither of
-// these endpoints requires the caller to already be logged in.
+// Register and login endpoints.
 package handlers
 
 import (
@@ -13,9 +11,8 @@ import (
 	"github.com/decode2211/evaassignment/internal/store"
 )
 
-// registerRequest is the expected JSON body for POST /auth/register.
-// Username is accepted as an alternative spelling of Name, since different
-// API clients sometimes use different field names for the same idea.
+// registerRequest is the JSON body for POST /auth/register.
+// Username is accepted as an alternate spelling of Name.
 type registerRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -23,10 +20,7 @@ type registerRequest struct {
 	Username string `json:"username"`
 }
 
-// registerResponse is what we send back after a successful registration.
-// Notice there is no password or password hash field here at all - it is
-// physically impossible for this struct to leak that information, because
-// the field simply does not exist on it.
+// registerResponse never includes a password or hash field.
 type registerResponse struct {
 	ID        int64  `json:"id"`
 	Email     string `json:"email"`
@@ -34,8 +28,7 @@ type registerResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// Register handles POST /auth/register: it validates the input, hashes the
-// password, and creates a new user account.
+// Register handles POST /auth/register.
 func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if err := httpx.DecodeJSON(w, r, &req); err != nil {
@@ -46,8 +39,6 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	email := normalizeEmail(req.Email)
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		// Accept "username" as a fallback spelling of "name" if the
-		// client sent that instead.
 		name = strings.TrimSpace(req.Username)
 	}
 
@@ -60,10 +51,7 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Why bcrypt: see internal/auth/password.go for the full explanation.
-	// In short, it is slow-by-design and salts automatically, which makes
-	// stolen password data far less useful to an attacker than a plain or
-	// fast hash would be.
+	// bcrypt is slow on purpose and salts automatically - see internal/auth/password.go.
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "could not process password")
@@ -88,27 +76,22 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// loginRequest is the expected JSON body for POST /auth/login.
+// loginRequest is the JSON body for POST /auth/login.
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
-// loginResponse is what we send back after a successful login: a signed
-// token the client must include on every future request to a protected
-// endpoint, plus metadata about how to use it.
 type loginResponse struct {
 	Token     string `json:"token"`
 	TokenType string `json:"token_type"`
 	ExpiresIn int    `json:"expires_in"`
 }
 
-// tokenExpirySeconds must match the actual token lifetime used when
-// signing (see internal/auth/jwt.go's tokenTTL, 24 hours).
+// tokenExpirySeconds must match tokenTTL in internal/auth/jwt.go.
 const tokenExpirySeconds = 24 * 60 * 60
 
-// Login handles POST /auth/login: it checks the given email and password
-// and, if they match a real account, issues a JWT.
+// Login handles POST /auth/login.
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := httpx.DecodeJSON(w, r, &req); err != nil {
@@ -122,11 +105,8 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// We deliberately give the exact same error, with the exact same
-	// wording, whether the email doesn't exist at all or the password is
-	// wrong. If we said "no such user" for one case and "wrong password"
-	// for the other, an attacker could use that difference to discover
-	// which email addresses have accounts on this system.
+	// Same message for unknown email and wrong password, so a caller can't
+	// use the response to find out which emails have an account.
 	const genericAuthError = "invalid email or password"
 
 	user, err := h.Store.GetUserByEmail(r.Context(), email)
