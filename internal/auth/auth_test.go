@@ -1,6 +1,4 @@
-// Unit tests for password hashing and JWT issuing/verifying. These cover
-// the security-critical primitives in isolation, before any HTTP code gets
-// involved.
+// Tests for password hashing and JWT issuing/verifying.
 package auth
 
 import (
