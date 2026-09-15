@@ -1,8 +1,4 @@
-// This is the entry point of the whole application - the file that runs
-// when you execute the compiled program. Its job is purely "wiring": read
-// configuration, open the database, build the HTTP router, and start
-// listening for requests, then shut down cleanly when asked to stop. All
-// the actual business logic lives in the internal/ packages, not here.
+// Entry point: wires config, DB, router, and handles graceful shutdown.
 package main
 
 import (
@@ -42,16 +38,13 @@ func main() {
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: router,
-		// These timeouts stop a slow or malicious client from tying up a
-		// connection (and a goroutine) forever.
+		// Bound connection lifetimes so a slow client can't hold one open forever.
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Run the server in the background so the main goroutine is free to
-	// wait for a shutdown signal instead.
 	serverErr := make(chan error, 1)
 	go func() {
 		slog.Info("server starting", "port", cfg.Port, "db_path", cfg.DBPath)
@@ -60,9 +53,6 @@ func main() {
 		}
 	}()
 
-	// Listen for Ctrl+C (SIGINT) or a termination request from the OS or
-	// container runtime (SIGTERM), so we can shut down gracefully instead
-	// of dropping in-flight requests when the process is stopped.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
@@ -74,8 +64,6 @@ func main() {
 		slog.Info("shutdown signal received", "signal", sig.String())
 	}
 
-	// Give in-flight requests up to 10 seconds to finish before forcing
-	// the shutdown, rather than cutting every open connection immediately.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
