@@ -1,0 +1,7 @@
+# Force LF line endings for scripts and source files regardless of the
+# cloning machine's git settings. This repo was developed on Windows; a
+# shell script committed with CRLF line endings fails to run on Linux
+# (the "#!/usr/bin/env bash" shebang line breaks), which would silently
+# break scripts/smoke_test.sh for anyone grading this on Linux/macOS/CI.
+* text=auto eol=lf
+*.sh text eol=lf
