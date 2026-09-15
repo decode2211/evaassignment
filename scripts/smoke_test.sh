@@ -1,26 +1,16 @@
 #!/usr/bin/env bash
-# This script is a plain-English sanity check for a *running* copy of the
-# ticket system - either the binary running directly on your machine, or a
-# Docker container. It uses nothing but curl, so anyone can read it and
-# understand exactly what it is checking without knowing Go.
+# End-to-end curl check against a running server: register, login, create
+# a ticket, list it, fetch it, move it through its status lifecycle, and
+# confirm a closed ticket can't reopen. Exits non-zero on any failure.
 #
-# It walks through the whole user story: register a brand-new account,
-# log in, create a ticket, list it, fetch it directly, move it through its
-# status lifecycle, and finally confirm that a closed ticket can never be
-# reopened. Each step prints PASS or FAIL, and the script exits non-zero
-# the moment anything unexpected happens, so it is safe to use as a CI gate.
-#
-# Usage:
-#   ./scripts/smoke_test.sh [BASE_URL]
-#   BASE_URL defaults to http://localhost:8080
+# Usage: ./scripts/smoke_test.sh [BASE_URL]   (default http://localhost:8080)
 
 set -u
 
 BASE_URL="${1:-http://localhost:8080}"
 FAILURES=0
 
-# A random email means the script can be re-run over and over against the
-# same running server without ever hitting "email already registered".
+# Random email so the script can be re-run against the same server.
 RAND_ID=$((RANDOM * RANDOM))
 EMAIL="smoketest+${RAND_ID}@example.com"
 PASSWORD="smoke-test-password"
@@ -28,10 +18,7 @@ PASSWORD="smoke-test-password"
 pass() { echo "  PASS - $1"; }
 fail() { echo "  FAIL - $1"; FAILURES=$((FAILURES + 1)); }
 
-# check_status calls a JSON endpoint and verifies the HTTP status code.
-# It prints the body too, so a failure is easy to debug by eye.
-# Sets the global BODY variable to the response body for the caller to
-# inspect further (e.g. to pull a token or ticket ID out of it).
+# Calls an endpoint, checks the status code, and sets BODY to the response.
 check_status() {
   local description="$1" expected="$2" method="$3" path="$4" data="${5:-}" auth="${6:-}"
   local args=(-s -o /tmp/smoke_body.$$ -w "%{http_code}" -X "$method" "${BASE_URL}${path}")
