@@ -1,0 +1,25 @@
+# Compiled binary
+/server
+/main
+/evaassignment
+
+# SQLite database files and data directory
+/data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Environment files
+.env
+
+# Go build/test artifacts
+*.test
+*.out
+/tmp/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
