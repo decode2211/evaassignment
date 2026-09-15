@@ -1,9 +1,4 @@
-// Integration tests exercise the real HTTP router (the same one main.go
-// builds) against a real, temporary SQLite database file. Unlike the unit
-// tests elsewhere in the project, these tests send actual HTTP requests
-// through httptest and check the actual JSON responses and status codes -
-// they are the closest thing to "does the finished API really behave as
-// documented" that can run without a network.
+// Integration tests: the real router against a temporary SQLite database.
 package handlers_test
 
 import (
@@ -21,9 +16,7 @@ import (
 	"github.com/decode2211/evaassignment/internal/store"
 )
 
-// newTestRouter builds a full router backed by a fresh temporary SQLite
-// database, so each test starts from a clean, empty database and cannot
-// interfere with any other test.
+// newTestRouter builds a router backed by a fresh temporary SQLite database.
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -39,9 +32,8 @@ func newTestRouter(t *testing.T) http.Handler {
 	return handlers.NewRouter(h, mw, nil)
 }
 
-// doRequest sends a JSON request (or no body, if body is nil) through the
-// router and decodes the JSON response into out (if out is not nil). It
-// returns the HTTP status code.
+// doRequest sends a request through the router and decodes the JSON
+// response into out, returning the HTTP status code.
 func doRequest(t *testing.T, router http.Handler, method, path string, body any, token string, out any) int {
 	t.Helper()
 
@@ -75,9 +67,7 @@ func doRequest(t *testing.T, router http.Handler, method, path string, body any,
 	return rec.Code
 }
 
-// registerAndLogin is a small helper that creates one user and returns a
-// valid login token for them, so tests that only care about ticket
-// behaviour don't need to repeat the register+login boilerplate.
+// registerAndLogin creates a user and returns a valid login token.
 func registerAndLogin(t *testing.T, router http.Handler, email string) string {
 	t.Helper()
 	registerBody := map[string]string{"email": email, "password": "secret123", "name": "Test User"}
