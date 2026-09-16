@@ -24,10 +24,3 @@ Thumbs.db
 .vscode/
 .idea/
 
-# AI tool files / notes
-CLAUDE.md
-.claude/
-AGENTS.md
-.cursor*
-MASTER_PROMPT.md
-
